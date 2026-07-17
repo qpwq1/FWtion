@@ -62,8 +62,8 @@ int main(int argc, char* argv[]) {
         // 去除空格（与原有行为一致）
         std::string clean = "";
         for (char c : line) {
-            if (c != ' ') clean += c;
-        }
+            if (c != ' ' && c != '\r') clean += c;
+	}
         Code[Linenumber] = clean;
         Linenumber++;
     }
