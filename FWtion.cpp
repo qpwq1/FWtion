@@ -2,6 +2,8 @@
 #include <fstream>
 #include <string>
 #include <cstdlib>
+#include <cerrno>   // for errno in strtol
+#include <climits>  // for INT_MAX
 
 std::string CodeFilename = "Code";
 short BoradX = 24;
@@ -11,17 +13,27 @@ std::string BianLiangMingstring[1000] = {};
 short Borad[24][18] = {0};
 std::string line;
 int Linenumber = 0;
-std::string Code[10000];
+const int MAX_LINES = 10000;          // 与数组大小一致
+std::string Code[MAX_LINES];
 std::string colorPart = "";
 int currentLine = 0;
 std::string outputCommand = "";
 
-// 检查字符串是否全为数字
-bool isNumber(const std::string& s) {
+// 安全字符串转整数（不添加新功能，仅用标准库函数替换手写循环）
+bool safeStoi(const std::string& s, int& out) {
     if (s.empty()) return false;
+    // 只允许纯数字（与原有行为一致）
     for (char c : s) {
         if (c < '0' || c > '9') return false;
     }
+    // 使用 strtol 检查溢出
+    const char* str = s.c_str();
+    char* endptr;
+    errno = 0;
+    long val = std::strtol(str, &endptr, 10);
+    if (errno == ERANGE || val > INT_MAX || val < 0) return false; // 坐标不可能为负
+    if (endptr != str + s.length()) return false; // 未完全转换
+    out = static_cast<int>(val);
     return true;
 }
 
@@ -44,24 +56,25 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    while (std::getline(read, line)) {
-        Linenumber++;
-    }
-    read.close();
-    std::cout << "正在编译..." << std::endl;
-
-    read.open(CodeFilename + ".fw");
-    while (std::getline(read, line)) {
+    // 一次读取完成统计行数和存储代码，避免重读不一致
+    Linenumber = 0;
+    while (Linenumber < MAX_LINES && std::getline(read, line)) {
+        // 去除空格（与原有行为一致）
         std::string clean = "";
         for (char c : line) {
-            if (c != ' ') {
-                clean += c;
-            }
+            if (c != ' ') clean += c;
         }
-        line = clean;
-        Code[currentLine++] = line;
+        Code[Linenumber] = clean;
+        Linenumber++;
+    }
+    if (Linenumber == MAX_LINES && std::getline(read, line)) {
+        std::cerr << "错误！文件行数超过 " << MAX_LINES << " 行限制" << std::endl;
+        std::cin.get();
+        return 1;
     }
     read.close();
+
+    std::cout << "正在编译..." << std::endl;
 
     if (Linenumber < 1) {
         std::cerr << "错误！文件为空" << std::endl;
@@ -69,6 +82,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    // 处理第一行初始化
     std::string firstLine = Code[0];
     if (!firstLine.empty() && firstLine.back() == ';') {
         firstLine = firstLine.substr(0, firstLine.size() - 1);
@@ -89,11 +103,10 @@ int main(int argc, char* argv[]) {
         for (int j = 0; j < 18; j++)
             Borad[i][j] = fillValue;
 
+    // 分号检查（跳过空行和注释）
     for (int i = 1; i < Linenumber; i++) {
         std::string l = Code[i];
-        if (l.empty() || l.find("//") == 0) {
-            continue;
-        }
+        if (l.empty() || l.find("//") == 0) continue;
         if (l.back() != ';') {
             std::cerr << "错误！第" << i + 1 << "行末尾需加分号" << std::endl;
             std::cin.get();
@@ -101,11 +114,13 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    // 解析指令
     for (int i = 1; i < Linenumber; i++) {
         std::string l = Code[i];
         if (l.empty() || l.find("//") == 0) continue;
         if (l.back() == ';') l = l.substr(0, l.size() - 1);
 
+        // 变量定义
         if (l.find("All") == 0 || l.find("all") == 0) {
             std::size_t equalPos = l.find('=');
             if (equalPos != std::string::npos) {
@@ -119,17 +134,26 @@ int main(int argc, char* argv[]) {
                 if (!varValue.empty() && varValue.back() == ';') {
                     varValue = varValue.substr(0, varValue.size() - 1);
                 }
+                // 存入变量表（检查是否已满）
+                bool stored = false;
                 for (int j = 0; j < 1000; j++) {
                     if (BianLiangName[j] == "") {
                         BianLiangName[j] = varName;
                         BianLiangMingstring[j] = varValue;
+                        stored = true;
                         break;
                     }
+                }
+                if (!stored) {
+                    std::cerr << "错误！变量定义超过最大数量 1000" << std::endl;
+                    std::cin.get();
+                    return 1;
                 }
             }
             continue;
         }
 
+        // 输出语句（保留但不使用，维持原有行为）
         if (l.find("output") == 0) {
             std::size_t startQuote = l.find('"');
             std::size_t endQuote = l.rfind('"');
@@ -140,29 +164,28 @@ int main(int argc, char* argv[]) {
             continue;
         }
 
+        // 画点指令 <<
         colorPart = "";
         int pos = -1;
-        for (int p = 0; p < l.size(); p++) {
-            if (l[p] == '<' && p + 1 < l.size() && l[p + 1] == '<') {
+        for (int p = 0; p < (int)l.size(); p++) {
+            if (l[p] == '<' && p + 1 < (int)l.size() && l[p + 1] == '<') {
                 pos = p;
                 break;
             }
         }
 
-        if (pos == -1) {
-            continue;
-        }
+        if (pos == -1) continue;
 
         for (int p = 0; p < pos; p++)
             if (l[p] != ' ') colorPart += l[p];
 
         std::string coordPart = "";
-        for (int p = pos + 2; p < l.size(); p++)
+        for (int p = pos + 2; p < (int)l.size(); p++)
             if (l[p] != ' ' && l[p] != '(' && l[p] != ')')
                 coordPart += l[p];
 
         int commaPos = -1;
-        for (int p = 0; p < coordPart.size(); p++)
+        for (int p = 0; p < (int)coordPart.size(); p++)
             if (coordPart[p] == ',') { commaPos = p; break; }
 
         if (commaPos == -1 || colorPart.empty()) continue;
@@ -170,6 +193,7 @@ int main(int argc, char* argv[]) {
         std::string xStr = coordPart.substr(0, commaPos);
         std::string yStr = coordPart.substr(commaPos + 1);
 
+        // 变量替换（坐标）
         for (int v = 0; v < 1000; v++) {
             if (!BianLiangName[v].empty() && BianLiangName[v] == xStr) {
                 xStr = BianLiangMingstring[v];
@@ -182,18 +206,14 @@ int main(int argc, char* argv[]) {
                 break;
             }
         }
+        // 颜色部分暂不支持变量（保持原设计）
 
-        // 验证坐标是否为纯数字
-        if (!isNumber(colorPart) || !isNumber(xStr) || !isNumber(yStr)) {
-            std::cerr << "错误！第" << i + 1 << "行颜色或坐标包含非数字字符" << std::endl;
+        int color, x, y;
+        if (!safeStoi(colorPart, color) || !safeStoi(xStr, x) || !safeStoi(yStr, y)) {
+            std::cerr << "错误！第" << i + 1 << "行颜色或坐标格式无效" << std::endl;
             std::cin.get();
             return 1;
         }
-
-        int color = 0, x = 0, y = 0;
-        for (char c : colorPart) color = color * 10 + (c - '0');
-        for (char c : xStr) x = x * 10 + (c - '0');
-        for (char c : yStr) y = y * 10 + (c - '0');
 
         if (y < 0 || y >= 24 || x < 0 || x >= 18) {
             std::cerr << "错误！第" << i + 1 << "行坐标越界: (" << y << "," << x << ")" << std::endl;
@@ -210,6 +230,7 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    // 写入棋盘文件
     std::ofstream fkFile("runs/cache/" + CodeFilename + ".fk");
     if (!fkFile) {
         std::cerr << "错误！无法创建输出文件 runs/cache/" << CodeFilename << ".fk" << std::endl;
@@ -225,9 +246,10 @@ int main(int argc, char* argv[]) {
     }
     fkFile.close();
 
+    // 显示棋盘
     for (int i = 0; i < 24; i++) {
         for (int j = 0; j < 18; j++) {
-            std::cout << (Borad[i][j] == 1 ? "\u25A1" : "\u25A0");  // 使用 Unicode 码点更可靠
+            std::cout << (Borad[i][j] == 1 ? "\u25A1" : "\u25A0");
         }
         std::cout << "\n";
     }
