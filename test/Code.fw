@@ -1,0 +1,4 @@
+Borad(0);
+output("a");
+0 << 1,1;
+output("\n b");
